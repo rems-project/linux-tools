@@ -1,6 +1,6 @@
 #!/bin/zsh
 
-. ${0:a:h}/config.sh
+. ${0:a:h:h}/config.sh
 
 # brew install make <--- for `gmake`
 
@@ -9,14 +9,14 @@ NPROC=$(sysctl -n hw.physicalcpu)
 
 # if available use https://ccache.dev/ (speeding up recompilation)
 if type 'ccache' > /dev/null; then
-  WRAPPED_CLANG="ccache ${CLANG}"
+  WRAPPED_CLANG="ccache ${CONFIG_CLANG}"
 else
-  WRAPPED_CLANG="${CLANG}"
+  WRAPPED_CLANG="${CONFIG_CLANG}"
 fi
 
 vars=(
   ARCH=arm64
-  CROSS_COMPILE=aarch64-none-elf-
+  CROSS_COMPILE=${CONFIG_CROSS_COMPILE_PREFIX}
   # LD=ld.lld
   CC=${CC:-${WRAPPED_CLANG}}
   # INSTALL_PATH=${install}/boot
