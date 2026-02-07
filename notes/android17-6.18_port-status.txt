@@ -1,0 +1,100 @@
+DONE	M	Makefile
+DONE	M	arch/arm64/include/asm/kvm_hyp.h
+DONE	M	arch/arm64/include/asm/kvm_mmu.h
+DONE	M	arch/arm64/kvm/Kconfig
+DONE	M	arch/arm64/kvm/Makefile
+DONE	M	arch/arm64/kvm/hyp/include/nvhe/mem_protect.h
+DONE	M	arch/arm64/kvm/hyp/include/nvhe/mm.h
+DONE	M	arch/arm64/kvm/hyp/include/nvhe/pkvm.h
+DONE	M	arch/arm64/kvm/hyp/nvhe/Makefile
+DONE	M	arch/arm64/kvm/hyp/nvhe/modules.c
+DONE	M	arch/arm64/kvm/hyp/nvhe/page_alloc.c
+DONE	M	arch/arm64/kvm/hyp/nvhe/hyp-main.c
+DONE	M	arch/arm64/kvm/hyp/nvhe/switch.c
+DONE	M	arch/arm64/kvm/hyp/include/hyp/fault.h
+DONE	M	arch/arm64/kvm/hyp/include/nvhe/spinlock.h
+DONE	M	arch/arm64/kvm/hyp/nvhe/setup.c
+DONE	M	arch/arm64/kvm/hyp/nvhe/tlb.c					RECHECK
+	M	arch/arm64/kvm/hyp/nvhe/pkvm.c					TODO(check all done)
+	M	arch/arm64/kvm/pkvm.c
+	M	arch/arm64/kvm/va_layout.c
+
+VALIDATE	M	arch/arm64/kvm/hyp/nvhe/mm.c
+
+VALIDATE	M	arch/arm64/kvm/hyp/nvhe/mem_protect.c
+
+	===>>  MISSING
+
+	#if defined(CONFIG_NVHE_GHOST_SPEC_INJECT_ERROR_do_donate_OMIT_host_initiate_donation)
+		return 0;
+	#else
+		return host_stage2_set_owner_locked(tx->initiator.addr, size, owner_id);
+	#endif /* defined(CONFIG_NVHE_GHOST_SPEC_INJECT_ERROR_do_donate_OMIT_host_initiate_donation) */
+
+	===> AND
+
+	#if !defined(CONFIG_NVHE_GHOST_SPEC_INJECT_ERROR_do_share_OMIT_CHECKS)
+		ret = check_share(&checked_tx);
+		if (ret)
+			return ret;
+	#endif /* !defined(CONFIG_NVHE_GHOST_SPEC_INJECT_ERROR_do_share_OMIT_CHECKS) */
+
+	====>> AND
+
+	#if defined(CONFIG_NVHE_GHOST_SPEC_INJECT_ERROR_host_share_hyp_WRONG_COMPLETER)
+				.id	= PKVM_ID_GUEST,
+	#else
+				.id	= PKVM_ID_HYP,
+	#endif
+
+
+M	arch/arm64/kvm/hyp/pgtable.c
+
+DEAD M	include/kvm/iommu.h
+
+
+
+A	.gitmodules
+A	arch/arm64/include/uapi/asm/pkvm_proxy.h
+A	arch/arm64/kvm/Kconfig-ghost
+A	arch/arm64/kvm/Kconfig-ghost-inject-errors
+A	arch/arm64/kvm/Kconfig-ghost-inject-fixes
+A	arch/arm64/kvm/hyp/include/nvhe/ghost/
+A	arch/arm64/kvm/hyp/nvhe/ghost/.gitignore
+A	arch/arm64/kvm/hyp/nvhe/ghost/casemate
+A	arch/arm64/kvm/hyp/nvhe/ghost/
+A	arch/arm64/kvm/pkvm_proxy.c
+A	cl
+
+
+======= CURRENT pkvm-verif-android17-6.18 DIFFS ======
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+  (commit or discard the untracked or modified content in submodules)
+	modified:   .gitmodules
+	modified:   Makefile
+	modified:   arch/arm64/include/asm/kvm_hyp.h
+	modified:   arch/arm64/include/asm/kvm_mmu.h
+	modified:   arch/arm64/kvm/Kconfig
+	modified:   arch/arm64/kvm/Makefile
+	modified:   arch/arm64/kvm/hyp/include/hyp/fault.h
+	modified:   arch/arm64/kvm/hyp/include/nvhe/ghost/ghost_spec.h
+	modified:   arch/arm64/kvm/hyp/include/nvhe/ghost/ghost_tracing.h
+	modified:   arch/arm64/kvm/hyp/include/nvhe/mem_protect.h
+	modified:   arch/arm64/kvm/hyp/include/nvhe/mm.h
+	modified:   arch/arm64/kvm/hyp/include/nvhe/pkvm.h
+	modified:   arch/arm64/kvm/hyp/nvhe/Makefile
+	modified:   arch/arm64/kvm/hyp/nvhe/ghost/ghost_recording.c
+	modified:   arch/arm64/kvm/hyp/nvhe/hyp-main.c
+	modified:   arch/arm64/kvm/hyp/nvhe/mm.c
+	modified:   arch/arm64/kvm/hyp/nvhe/modules.c
+	modified:   arch/arm64/kvm/hyp/nvhe/page_alloc.c
+	modified:   arch/arm64/kvm/hyp/nvhe/pkvm.c
+	modified:   arch/arm64/kvm/hyp/nvhe/switch.c
+	modified:   arch/arm64/kvm/pkvm.c
+	modified:   arch/arm64/kvm/va_layout.c
+	modified:   arch/arm64/tools/gen-hyprel.c
+	modified:   cl (untracked content)
+	modified:   scripts/Makefile.extrawarn
