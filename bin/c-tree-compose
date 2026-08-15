@@ -1,0 +1,62 @@
+#!/usr/bin/env python
+"""
+Combine any number of c-tree-carve output directory trees into a single tree.
+"""
+
+import sys, os, logging
+from pathlib import Path
+log = logging.getLogger(sys.argv[0] or __name__)
+
+def merge(lines1, lines2):
+    assert len(lines1) == len(lines2), "Mismatched number of lines"
+    def select(line1, line2):
+        if not (line1[:3] == b'//-' and line2[:3] == b'//-'):
+            line1, line2 = line1.removeprefix(b'//-'), line2.removeprefix(b'//-')
+        assert line1 == line2, "Lines are not the same"
+        return line2
+    return [select(*line) for line in zip(lines1, lines2)]
+
+def compose(target, srcs):
+    assert len(srcs) > 0, "No sources"
+    lines = None
+    for src in srcs:
+        log.debug(f"adding {src}")
+        with open(src, 'rb') as fd:
+            lines = merge(lines, list(fd)) if lines else list(fd)
+    with open(target, 'wb') as fd:
+        fd.write(b''.join(lines))
+
+def discover(roots):
+    tree = {}
+    for root in roots:
+        for dir, _, files in os.walk(root):
+            for file in files:
+                path  = Path(dir) / file
+                cpath = path.relative_to(root)
+                tree[cpath] = tree.get(cpath, []) + [path]
+    return tree.items()
+
+def tree_compose(target, srcsroots):
+    for base, srcs in discover(srcsroots):
+        log.info(f"{base}: %d sources." % len(srcs))
+        dest = target / base
+        dest.parent.mkdir(parents = True, exist_ok = True)
+        compose(dest, srcs)
+
+def loglevel(ll): return getattr(logging, ll)
+
+if __name__ == '__main__':
+
+    import argparse
+    ap = argparse.ArgumentParser(description = __doc__)
+    ap.add_argument("--output", required = True, type = Path,
+                    metavar = "DIR", help = "root directory for the output tree (will be created)")
+    ap.add_argument("sources", nargs = '+', type = Path,
+                    metavar = "DIR", help = "input directory trees (as produced by carver)")
+    ap.add_argument("--log-level", type = loglevel, default = logging.WARN,
+                    metavar = "LEVEL", help = "{DEBUG,INFO,WARN}")
+    args = ap.parse_args()
+
+    logging.basicConfig(level = args.log_level)
+    args.output.mkdir(parents = True)
+    tree_compose(args.output, args.sources)
