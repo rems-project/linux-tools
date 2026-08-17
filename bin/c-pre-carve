@@ -1,0 +1,80 @@
+#!/usr/bin/env python
+"""
+Transform C sources, moving declarations to separate lines.
+"""
+
+import sys
+from tree_sitter import Language, Parser, Query, QueryCursor
+
+import tree_sitter_c
+C = Language(tree_sitter_c.language())
+
+# ## Crowbar alternative, without the grammar bindings, slower
+# import ctypes
+# lib = ctypes.CDLL("libtree-sitter-c.so")
+# lib.tree_sitter_c.restype = ctypes.c_void_p
+# C = Language(lib.tree_sitter_c())
+
+parser = Parser(C)
+qdecl = QueryCursor(Query(C, """
+  (translation_unit
+    [ (declaration)
+      (function_definition)
+      (type_definition)
+      (struct_specifier)
+      (union_specifier)
+      (enum_specifier)
+    ] @decl)
+"""))
+
+def separate(text):
+    text = bytearray(text)
+    tree = parser.parse(text)
+    matches = [n for (_, cap) in qdecl.matches(tree.root_node)
+                 for n in cap['decl']]
+    pairs = [(a, b) for (a, b) in zip(matches, matches[1:])
+                    if a.range.end_point[0] == b.range.start_point[0]]
+
+    for a, b in reversed(pairs):
+        start, _ = b.byte_range
+        text[start:start] = b'\n'
+
+    return bytes(text)
+
+def read(path):
+    if path:
+        with open(path, 'rb') as fd:
+            return fd.read()
+    else: return sys.stdin.read().encode()
+
+def write(path, text):
+    if path:
+        with open(path, 'wb') as fd:
+            fd.write(text)
+    else: sys.stdout.write(text.decode())
+
+###
+
+epilogue = """
+Needs:
+    1) `tree-sitter`, the C library;
+    2) `tree-sitter-c`, the C library defining C grammar;
+    3) `tree-sitter`, Python bindings for 1); and
+    4) `tree-sitter-c`, Python bindings for 2).
+
+1 & 2 best installed system-wide. 3 & 4 can be installed locally:
+
+    $ python -m venv .venv && source ~/.venv/bin/activate
+    $ pip install tree-sitter tree-sitter-c
+"""
+
+if __name__ == '__main__':
+
+    import argparse
+    ap = argparse.ArgumentParser(description = __doc__, epilog = epilogue,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--output", metavar = "FILE", help = "output file (def stdout)")
+    ap.add_argument("--input", metavar = "FILE", help = "input file (def stdin)")
+    args = ap.parse_args()
+
+    write(args.output, separate(read(args.input)))
