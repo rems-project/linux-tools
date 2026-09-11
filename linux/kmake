@@ -1,6 +1,7 @@
 #!/bin/zsh
 
-. ${0:a:h:h}/config.sh
+source ${0:a:h:h}/common.sh
+[[ -r ${0:a:h:h}/local-config.sh ]] && source ${0:a:h:h}/local-config.sh
 
 NPROC=$(nproc)
 
@@ -15,8 +16,8 @@ vars=(
   ARCH=arm64
   CROSS_COMPILE=${CONFIG_CROSS_COMPILE_PREFIX}
   CC=${CC:-${WRAPPED_CLANG}}
-  # INSTALL_PATH=${install}/boot
-  # INSTALL_MOD_PATH=${install}
+  INSTALL_PATH=${install}/boot
+  INSTALL_MOD_PATH=${install}
 )
 
 exec make LLVM=1 $vars -j ${NPROC} "${@}"
