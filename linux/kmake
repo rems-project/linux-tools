@@ -1,0 +1,22 @@
+#!/bin/zsh
+
+. ${0:a:h:h}/config.sh
+
+NPROC=$(nproc)
+
+# if available use https://ccache.dev/ (speeding up recompilation)
+if type 'ccache' > /dev/null; then
+  WRAPPED_CLANG="ccache ${CONFIG_CLANG}"
+else
+  WRAPPED_CLANG="${CONFIG_CLANG}"
+fi
+
+vars=(
+  ARCH=arm64
+  CROSS_COMPILE=${CONFIG_CROSS_COMPILE_PREFIX}
+  CC=${CC:-${WRAPPED_CLANG}}
+  # INSTALL_PATH=${install}/boot
+  # INSTALL_MOD_PATH=${install}
+)
+
+exec make LLVM=1 $vars -j ${NPROC} "${@}"
