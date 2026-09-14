@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""
+Carve out C files, keep the important bits.
+"""
+# XXX TODO
+#
+# #IF blocks are completely lost. Either reconstruct them, or add separate
+# header guards.
+# 
+
+import sys, os, logging
+from pathlib import Path
+log = logging.getLogger(sys.argv[0] or __name__)
+from clang import cindex as C
+CK = C.CursorKind
+
+class Chdir:
+    def __init__(self, dir):
+        self.dir = dir
+    def __enter__(self):
+        self.olddir = os.getcwd()
+        os.chdir(self.dir)
+    def __exit__(self, *args):
+        os.chdir(self.olddir)
+
+def relevant_macro(nd):
+    return not nd.location.is_in_system_header and nd.location.file
+
+class Macros:
+    def __init__(self, tu):
+        self.tu = tu
+        insts = (c for c in tu.cursor.get_children() if c.kind == CK.MACRO_INSTANTIATION)
+        self.insts = {}
+        for c in insts:
+            self.insts.setdefault(c.location.file.name, []).append(c)
+        defs = (c for c in tu.cursor.get_children() if c.kind == CK.MACRO_DEFINITION and relevant_macro(c))
+        self.seq, self.defs  = {}, {}
+        for i, c in enumerate(defs):
+            self.seq[c] = i
+            self.defs.setdefault(c.spelling, []).insert(0, c)
+    def referenced_by(self, nd):
+        assert nd.kind != CK.MACRO_DEFINITION
+        if not nd.location.file: return []
+        # XXX linear scan
+        refd = (i.referenced for i in self.insts.get(nd.location.file.name, []) if i.location in nd.extent)
+        return (defn for defn in refd if relevant_macro(defn))
+    def referenced_by_macro(self, nd):
+        # XXX re-lexes the macro and plucks all macros before that point whose
+        # name is a token in the definition — could trigger on macro params
+        assert nd.kind == CK.MACRO_DEFINITION
+        seq = self.seq[nd]
+        ids = (t.spelling for t in self.tu.get_tokens(extent = nd.extent)
+                if t.kind == C.TokenKind.IDENTIFIER)
+        next(ids)
+        res = (next((n for n in self.defs[id] if self.seq[n] < seq), None)
+               for id in set(ids) if id in self.defs)
+        return set(m for m in res if m)
+
+
+def reachable_c(tu, roots = []):
+    toplevel = set(tu.cursor.get_children())
+    cover = set()
+    def go(nd):
+        if not nd or nd in cover or not nd in toplevel: return
+        cover.add(nd)
+        for nx in nd.walk_preorder(): go(nx.referenced)
+    for r in roots: go(r)
+    return cover
+
+# CIndex exposes pre-processed AST, plus event-like pseudo-nodes in the
+# translation unit marking pre-processor events, so macros need a separate walk.
+def reachable_pp(tu, roots):
+    macros = Macros(tu)
+    # XXX slowdown
+    edge = set(defn for r in roots for defn in macros.referenced_by(r))
+    seen = set()
+    while len(edge):
+        defn = edge.pop()
+        seen.add(defn)
+        edge = edge.union(macros.referenced_by_macro(defn))
+    return seen
+
+# def reachable_includes(tu, roots):
+#     files = set(nd.location.file.name for nd in roots)
+#     return set(nd for nd in tu.cursor.get_children()
+#                if nd.kind == CK.INCLUSION_DIRECTIVE and
+#                   nd.location.file and nd.location.file.name in files and
+#                   nd.get_included_file().name in files)
+
+# XXX
+def reachable_includes(tu, roots):
+    incs = set(nd for nd in tu.cursor.get_children() if nd.kind == CK.INCLUSION_DIRECTIVE)
+    files = set(nd.location.file.name for nd in roots)
+    res = set()
+    while True:
+        step = set(nd for nd in incs if nd.get_included_file().name in files and nd.location.file)
+        if not step: return res
+        files = set(nd.location.file.name for nd in step)
+        incs, res = incs.difference(step), res.union(step)
+
+def reachable(tu, roots):
+    defns = reachable_c(tu, roots)
+    defns = defns.union(reachable_pp(tu, defns))
+    defns = defns.union(reachable_includes(tu, defns))
+    return defns
+
+def base_file_toplevels(tu):
+    file = list(tu.cursor.get_children())[-1].location.file
+    return set(nd for nd in tu.cursor.get_children() if nd.location.file == file)
+
+def default_roots(tu):
+    base = base_file_toplevels(tu)
+    return set(nd for nd in base if nd.kind == CK.VAR_DECL or nd.kind == CK.FUNCTION_DECL)
+
+def resolve_roots(tu, roots):
+    roots = set(roots)
+    base = base_file_toplevels(tu)
+    resolved = set(nd for nd in base if nd.spelling in roots)
+    missing = roots.difference(nd.spelling for nd in resolved)
+    if missing: log.debug(f"Cannot find roots: {missing}")
+    return resolved
+
+class Loader:
+    def __init__(self, root):
+        self.root = Path(root)
+        self.db = C.CompilationDatabase.fromDirectory(root)
+        self.index = C.Index.create(excludeDecls = False)
+    def args(self, file):
+        def rm(arr, x, andnext = 0):
+            if x in arr:
+                i = arr.index(x)
+                arr[i:i + 1 + andnext] = []
+        args = self.db.getCompileCommands(self.root / file)
+        assert len(args) == 1, "Too many ways to build"
+        args = list(args[0].arguments)[1:]
+        rm(args, '-o', andnext = 1)
+        for arg in ['-c', str(file), str(self.root / file)]: rm(args, arg)
+        return args
+    def load(self, file, detailed = True, ignore = C.Diagnostic.Warning):
+        file = Path(file)
+        if file.is_absolute(): file = file.relative_to(self.root)
+        args = self.args(file)
+        options = C.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD if detailed else 0
+        with Chdir(self.root):
+            tu = self.index.parse(self.root / file, args = args, options = options)
+        for diag in tu.diagnostics:
+            self.log_diagnostic(diag)
+            for ch in diag.children: self.log_diagnostic(ch)
+        assert len([d for d in tu.diagnostics if d.severity > ignore]) == 0, list(tu.diagnostics)
+        return tu
+    def log_diagnostic(self, diag):
+        log.log((diag.severity + 1) * 10, diag.format())
+
+class Carver:
+    def __init__(self, root):
+        self.root = root
+        self.linemap = {}
+    def add_translation_unit(self, tu, refd):
+        for nd in refd:
+            path = Path(nd.location.file.name)
+            if path.is_absolute(): path = path.relative_to(self.root)
+            lines = self.linemap.setdefault(path, {})
+            for ln in range(nd.extent.start.line, nd.extent.end.line +  1):
+                lines[ln] = True
+    def save(self, dstroot):
+        for path, linemap in self.linemap.items():
+            dstfile = dstroot / path
+            dstfile.parent.mkdir(parents = True, exist_ok = True)
+            with open(self.root / path, 'r') as src:
+                with open(dstroot / path, 'w') as dst:
+                    for i, line in enumerate(src):
+                        # loc = C.SourceLocation.from_position(tu, file, i + 1, 1)
+                        # C.Cursor.from_location(tu, loc)
+                        # .kind == CK.NO_DECL_FOUND
+                        if not (i + 1) in linemap:
+                            dst.write('//-')
+                        dst.write(line)
+
+def main(project_root, files, roots, output):
+    loader = Loader(project_root)
+    carver = Carver(project_root)
+    for file in files:
+        log.debug(f"loading {file}")
+        tu = loader.load(file)
+        roots1 = resolve_roots(tu, roots) if roots else default_roots(tu)
+        log.debug("file roots: %s" % [nd.spelling for nd in roots1])
+        refd = reachable(tu, roots1)
+        carver.add_translation_unit(tu, refd)
+    carver.save(output)
+
+def find_project_root(files):
+    def scan(file):
+        while file != Path('/') and not (file / "compile_commands.json").is_file():
+            file = file.parent
+        return file
+    res = [scan(file) for file in files]
+    assert len(set(res)) == 1 and res[0] != Path('/'), "Cannot find a common project root"
+    return res[0]
+
+def loglevel(ll): return getattr(logging, ll)
+
+if __name__ == '__main__':
+
+    import argparse
+    ap = argparse.ArgumentParser(description = __doc__)
+
+    ap.add_argument("--output", required = True, type = Path, metavar = "DIR",
+                    help = "root of the output tree")
+    ap.add_argument("sources", nargs = '+', type = Path, metavar = "SOURCE",
+                    help = "input files")
+    ap.add_argument("--roots", metavar = "IDENTIFIER", type = lambda s: s.split(),
+                    help = "start tracing from these (space-separated) identifiers")
+    ap.add_argument("--project-root", type = Path, metavar = "DIR",
+                    help = "where to find compile_commands.json and how to interpret relative paths")
+    ap.add_argument("--log-level", type = loglevel, default = logging.WARN,
+                    metavar = "LEVEL", help = "{DEBUG,INFO,WARN}")
+    args = ap.parse_args()
+
+    logging.basicConfig(level = args.log_level)
+    if not args.project_root:
+        args.project_root = find_project_root(args.sources)
+
+    log.debug(f"Project root: {args.project_root}")
+    log.debug(f"Output: {args.output}")
+    log.debug(f"Sources: {args.sources}")
+    log.debug(f"Roots: {args.roots}")
+
+    main(args.project_root, args.sources, args.roots, args.output)
+
